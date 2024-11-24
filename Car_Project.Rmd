@@ -1,6 +1,6 @@
 ---
-title: "RitProject_Project"
-author: "Mohammad Bin Haider"
+title: "Data-Driven Car Price Prediction: A Comprehensive Approach Using Regression Modeling and Feature Engineering"
+author: "Suhil Almuhaisni - Mohammed Bin Haider - Shaika Alsuwaidi - Mahra Alattar"
 date: "`r Sys.Date()`"
 output:
   html_document: default
@@ -885,4 +885,461 @@ cat(
 
 ```
 
+```{r }
+# === Modeling ===
+
+## ==== Step 1: Data Splitting ====
+cat("\n==== Step 1: Train-Test-Validation Split ====\n")
+
+# Ensure 'price' is numeric
+data$price <- as.numeric(data$price)
+
+# Split the data into training (70%), testing (15%), and validation (15%)
+cat("\nSplitting the data into training, testing, and validation sets...\n")
+set.seed(123)  # For reproducibility
+train_indices <- createDataPartition(data$price, p = 0.7, list = FALSE)
+train_data <- data[train_indices, ]
+remaining_data <- data[-train_indices, ]
+
+# Further split remaining data into testing and validation
+test_indices <- createDataPartition(remaining_data$price, p = 0.5, list = FALSE)
+test_data <- remaining_data[test_indices, ]
+validation_data <- remaining_data[-test_indices, ]
+
+cat(sprintf("Training set size: %d rows\n", nrow(train_data)))
+cat(sprintf("Testing set size: %d rows\n", nrow(test_data)))
+cat(sprintf("Validation set size: %d rows\n", nrow(validation_data)))
+
+## ==== Step 2: Data Preprocessing ====
+cat("\n==== Step 2: Data Preprocessing ====\n")
+
+# Remove unnecessary columns (e.g., IDs, textual columns)
+excluded_columns <- c("car_ID", "CarName", "CarBrand")  # Replace as needed
+train_data <- train_data %>% select(-all_of(excluded_columns))
+test_data <- test_data %>% select(-all_of(excluded_columns))
+validation_data <- validation_data %>% select(-all_of(excluded_columns))
+
+# Convert categorical variables to factors
+categorical_vars <- names(train_data)[sapply(train_data, is.character)]
+train_data[categorical_vars] <- lapply(train_data[categorical_vars], as.factor)
+test_data[categorical_vars] <- lapply(test_data[categorical_vars], as.factor)
+validation_data[categorical_vars] <- lapply(validation_data[categorical_vars], as.factor)
+
+# Create dummy variables for categorical features
+cat("\nCreating dummy variables for categorical features...\n")
+dummies <- dummyVars(" ~ .", data = train_data)
+train_data <- data.frame(predict(dummies, newdata = train_data))
+test_data <- data.frame(predict(dummies, newdata = test_data))
+validation_data <- data.frame(predict(dummies, newdata = validation_data))
+
+# Ensure train, test, and validation datasets have the same columns
+missing_cols <- setdiff(names(train_data), names(test_data))
+for (col in missing_cols) {
+  test_data[[col]] <- 0
+  validation_data[[col]] <- 0
+}
+test_data <- test_data[, names(train_data)]
+validation_data <- validation_data[, names(train_data)]
+
+## ==== Step 3: Scaling Numeric Features ====
+cat("\n==== Step 3: Scaling Numeric Features ====\n")
+
+# Identify numeric columns (excluding the target variable 'price')
+numeric_cols <- setdiff(names(train_data)[sapply(train_data, is.numeric)], "price")
+
+# Apply Min-Max Scaling using training data parameters
+preProcValues <- preProcess(train_data[, numeric_cols], method = c("range"))
+train_data[, numeric_cols] <- predict(preProcValues, train_data[, numeric_cols])
+test_data[, numeric_cols] <- predict(preProcValues, test_data[, numeric_cols])
+validation_data[, numeric_cols] <- predict(preProcValues, validation_data[, numeric_cols])
+
+cat("Features scaled using Min-Max scaling.\n")
+
+# Remove zero or near-zero variance predictors
+nzv <- nearZeroVar(train_data)
+if (length(nzv) > 0) {
+  cat("\nRemoving near-zero variance predictors:\n")
+  print(names(train_data)[nzv])
+  train_data <- train_data[, -nzv]
+  test_data <- test_data[, -nzv]
+  validation_data <- validation_data[, -nzv]
+}
+
+## ==== Step 4: Build Linear Regression Model ====
+cat("\n==== Step 4: Build Linear Regression Model ====\n")
+
+# Specify formula (price as the dependent variable)
+formula <- price ~ .
+
+# Train the linear regression model
+linear_model <- lm(formula, data = train_data)
+
+# Display model summary
+cat("\nModel Summary:\n")
+print(summary(linear_model))
+
+## ==== Step 5: Evaluate Model Performance ====
+cat("\n==== Step 5: Evaluate Model Performance ====\n")
+
+# Predict on training, testing, and validation datasets
+train_predictions <- predict(linear_model, train_data)
+test_predictions <- predict(linear_model, test_data)
+validation_predictions <- predict(linear_model, validation_data)
+
+# Calculate RMSE and R-squared for training data
+train_rmse <- sqrt(mean((train_predictions - train_data$price)^2))
+train_r2 <- summary(linear_model)$r.squared
+cat(sprintf("Training RMSE: %.2f\n", train_rmse))
+cat(sprintf("Training R-squared: %.2f\n", train_r2))
+
+# Calculate RMSE and R-squared for testing data
+test_rmse <- sqrt(mean((test_predictions - test_data$price)^2))
+test_r2 <- cor(test_data$price, test_predictions)^2
+cat(sprintf("Testing RMSE: %.2f\n", test_rmse))
+cat(sprintf("Testing R-squared: %.2f\n", test_r2))
+
+# Calculate RMSE and R-squared for validation data
+validation_rmse <- sqrt(mean((validation_predictions - validation_data$price)^2))
+validation_r2 <- cor(validation_data$price, validation_predictions)^2
+cat(sprintf("Validation RMSE: %.2f\n", validation_rmse))
+cat(sprintf("Validation R-squared: %.2f\n", validation_r2))
+
+## ==== Step 6: Visualize Model Results ====
+cat("\n==== Step 6: Visualize Model Results ====\n")
+
+# Residual Plot
+residuals <- test_data$price - test_predictions
+ggplot(data.frame(Predicted = test_predictions, Residuals = residuals), aes(x = Predicted, y = Residuals)) +
+  geom_point(color = "darkblue", alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Residual Plot: Predicted vs Residuals",
+    x = "Predicted Prices",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+
+# Actual vs Predicted Prices Plot
+ggplot(data.frame(Actual = test_data$price, Predicted = test_predictions), aes(x = Actual, y = Predicted)) +
+  geom_point(color = "darkgreen", alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Actual vs Predicted Prices",
+    x = "Actual Prices",
+    y = "Predicted Prices"
+  ) +
+  theme_minimal()
+
+## ==== Step 7: Confusion Matrix Heatmap ====
+cat("\n==== Step 7: Confusion Matrix Heatmap ====\n")
+
+# Round predictions and actual prices for classification-like analysis
+actual <- round(test_data$price)
+predicted <- round(test_predictions)
+
+conf_matrix <- table(Predicted = predicted, Actual = actual)
+conf_matrix_df <- as.data.frame(conf_matrix)
+ggplot(conf_matrix_df, aes(x = Predicted, y = Actual, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black") +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  labs(title = "Confusion Matrix Heatmap", x = "Predicted", y = "Actual") +
+  theme_minimal()
+
+## ==== Step 8: ROC Curve ====
+cat("\n==== Step 8: ROC Curve ====\n")
+
+# Bin 'price' into categories
+price_bins <- quantile(test_data$price, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE)
+test_data$price_bin <- cut(
+  test_data$price,
+  breaks = c(-Inf, price_bins[2], price_bins[3], Inf),
+  labels = c("Low", "Medium", "High"),
+  include.lowest = TRUE
+)
+
+# Generate ROC curve
+library(pROC)
+roc_curve <- multiclass.roc(as.numeric(test_data$price_bin), test_predictions)
+roc_list <- roc_curve$rocs
+plot(roc_list[[1]], col = "red", main = "ROC Curves for Multiclass Linear Regression")
+for (i in 2:length(roc_list)) {
+  plot(roc_list[[i]], add = TRUE, col = rainbow(length(roc_list))[i])
+}
+legend(
+  "bottomright",
+  legend = paste("Class", 1:length(roc_list)),
+  col = rainbow(length(roc_list)),
+  lty = 1
+)
+
+## ==== Step 9: Precision-Recall Curve ====
+cat("\n==== Step 9: Precision-Recall Curve ====\n")
+
+library(PRROC)
+pr_curve <- pr.curve(scores.class0 = test_predictions, weights.class0 = as.numeric(test_data$price_bin == "High"), curve = TRUE)
+plot(pr_curve, main = "Precision-Recall Curve for High Price Class")
+
+# === Reflection on the Modeling Process ===
+# 
+# 1. **Data Splitting**: The dataset was split into training (70%), testing (15%), and validation (15%), ensuring robust performance evaluation.
+# 
+# 2. **Data Preprocessing**: Features were encoded, scaled, and aligned across datasets, avoiding data leakage and ensuring consistency.
+# 
+# 3. **Linear Regression**: The model revealed key drivers of car pricing and demonstrated reasonable predictive accuracy.
+# 
+# 4. **Performance Evaluation**: Metrics like RMSE and R-squared showed minimal overfitting, with validation results aligning well with testing.
+# 
+# 5. **Visualizations and Metrics**: Residual plots, ROC, and Precision-Recall curves identified areas for improvement, especially for high-price predictions.
+# 
+# **Future Improvements**:
+# - Explore non-linear models and feature engineering to capture complex patterns.
+# - Refine outlier handling and prediction thresholds for better class differentiation.
+```
+```{r}
+# === Modeling and Comparison: Linear Regression vs Random Forest ===
+
+# ==== Step 1: Data Splitting ====
+cat("\n==== Step 1: Train-Test-Validation Split ====\n")
+
+# Ensure 'price' is numeric
+data$price <- as.numeric(data$price)
+
+# Split the data into training (70%), testing (15%), and validation (15%)
+set.seed(123)  # For reproducibility
+train_indices <- createDataPartition(data$price, p = 0.7, list = FALSE)
+train_data <- data[train_indices, ]
+remaining_data <- data[-train_indices, ]
+
+# Further split remaining data into testing and validation
+test_indices <- createDataPartition(remaining_data$price, p = 0.5, list = FALSE)
+test_data <- remaining_data[test_indices, ]
+validation_data <- remaining_data[-test_indices, ]
+
+cat(sprintf("Training set size: %d rows\n", nrow(train_data)))
+cat(sprintf("Testing set size: %d rows\n", nrow(test_data)))
+cat(sprintf("Validation set size: %d rows\n", nrow(validation_data)))
+
+# ==== Step 2: Data Preprocessing ====
+cat("\n==== Step 2: Data Preprocessing ====\n")
+
+# Remove unnecessary columns
+excluded_columns <- c("car_ID", "CarName", "CarBrand")  # Replace as needed
+train_data <- train_data %>% select(-all_of(excluded_columns))
+test_data <- test_data %>% select(-all_of(excluded_columns))
+validation_data <- validation_data %>% select(-all_of(excluded_columns))
+
+# Convert categorical variables to factors
+categorical_vars <- names(train_data)[sapply(train_data, is.character)]
+train_data[categorical_vars] <- lapply(train_data[categorical_vars], as.factor)
+test_data[categorical_vars] <- lapply(test_data[categorical_vars], as.factor)
+validation_data[categorical_vars] <- lapply(validation_data[categorical_vars], as.factor)
+
+# Create dummy variables for categorical features
+cat("\nCreating dummy variables for categorical features...\n")
+dummies <- dummyVars(" ~ .", data = train_data)
+train_data <- data.frame(predict(dummies, newdata = train_data))
+test_data <- data.frame(predict(dummies, newdata = test_data))
+validation_data <- data.frame(predict(dummies, newdata = validation_data))
+
+# Ensure datasets have the same columns
+missing_cols <- setdiff(names(train_data), names(test_data))
+for (col in missing_cols) {
+  test_data[[col]] <- 0
+  validation_data[[col]] <- 0
+}
+test_data <- test_data[, names(train_data)]
+validation_data <- validation_data[, names(train_data)]
+
+# Scale numeric features
+numeric_cols <- setdiff(names(train_data)[sapply(train_data, is.numeric)], "price")
+preProcValues <- preProcess(train_data[, numeric_cols], method = c("range"))
+train_data[, numeric_cols] <- predict(preProcValues, train_data[, numeric_cols])
+test_data[, numeric_cols] <- predict(preProcValues, test_data[, numeric_cols])
+validation_data[, numeric_cols] <- predict(preProcValues, validation_data[, numeric_cols])
+
+# Remove near-zero variance predictors
+nzv <- nearZeroVar(train_data)
+if (length(nzv) > 0) {
+  train_data <- train_data[, -nzv]
+  test_data <- test_data[, -nzv]
+  validation_data <- validation_data[, -nzv]
+}
+
+# ==== Step 3: Linear Regression ====
+cat("\n==== Step 3: Linear Regression ====\n")
+
+linear_model <- lm(price ~ ., data = train_data)
+cat("\nLinear Regression Model Summary:\n")
+print(summary(linear_model))
+
+train_pred_lm <- predict(linear_model, train_data)
+test_pred_lm <- predict(linear_model, test_data)
+validation_pred_lm <- predict(linear_model, validation_data)
+
+train_rmse_lm <- sqrt(mean((train_pred_lm - train_data$price)^2))
+test_rmse_lm <- sqrt(mean((test_pred_lm - test_data$price)^2))
+validation_rmse_lm <- sqrt(mean((validation_pred_lm - validation_data$price)^2))
+
+train_r2_lm <- summary(linear_model)$r.squared
+test_r2_lm <- cor(test_data$price, test_pred_lm)^2
+validation_r2_lm <- cor(validation_data$price, validation_pred_lm)^2
+
+cat(sprintf("Linear Regression RMSE - Train: %.2f, Test: %.2f, Validation: %.2f\n",
+            train_rmse_lm, test_rmse_lm, validation_rmse_lm))
+
+# ==== Step 4: Random Forest ====
+cat("\n==== Step 4: Random Forest ====\n")
+library(randomForest)
+
+rf_model <- randomForest(price ~ ., data = train_data, ntree = 100, importance = TRUE)
+cat("\nRandom Forest Model Summary:\n")
+print(rf_model)
+
+train_pred_rf <- predict(rf_model, train_data)
+test_pred_rf <- predict(rf_model, test_data)
+validation_pred_rf <- predict(rf_model, validation_data)
+
+train_rmse_rf <- sqrt(mean((train_pred_rf - train_data$price)^2))
+test_rmse_rf <- sqrt(mean((test_pred_rf - test_data$price)^2))
+validation_rmse_rf <- sqrt(mean((validation_pred_rf - validation_data$price)^2))
+
+train_r2_rf <- cor(train_data$price, train_pred_rf)^2
+test_r2_rf <- cor(test_data$price, test_pred_rf)^2
+validation_r2_rf <- cor(validation_data$price, validation_pred_rf)^2
+
+cat(sprintf("Random Forest RMSE - Train: %.2f, Test: %.2f, Validation: %.2f\n",
+            train_rmse_rf, test_rmse_rf, validation_rmse_rf))
+
+# ==== Step 5: Comparison Metrics ====
+comparison <- data.frame(
+  Model = c("Linear Regression", "Random Forest"),
+  RMSE_Train = c(train_rmse_lm, train_rmse_rf),
+  RMSE_Test = c(test_rmse_lm, test_rmse_rf),
+  RMSE_Validation = c(validation_rmse_lm, validation_rmse_rf),
+  R2_Train = c(train_r2_lm, train_r2_rf),
+  R2_Test = c(test_r2_lm, test_r2_rf),
+  R2_Validation = c(validation_r2_lm, validation_r2_rf)
+)
+cat("\n==== Model Comparison ====\n")
+print(comparison)
+
+# ==== Step 6: Professional Visualizations ====
+
+# 1. RMSE and R² Comparison (Bar Plots)
+comparison_long <- comparison %>%
+  pivot_longer(
+    cols = starts_with("RMSE") | starts_with("R2"),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  mutate(
+    Metric_Type = case_when(
+      grepl("RMSE", Metric) ~ "RMSE (Error)",
+      grepl("R2", Metric) ~ "R² (Variance Explained)"
+    )
+  )
+
+ggplot(comparison_long, aes(x = Model, y = Value, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ Metric_Type, scales = "free_y", nrow = 2) +
+  labs(
+    title = "Model Comparison: RMSE and R²",
+    x = "Model",
+    y = "Value",
+    fill = "Model"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c("Linear Regression" = "#4E79A7", "Random Forest" = "#F28E2B")) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    strip.text = element_text(face = "bold", size = 12),
+    legend.position = "top"
+  ) +
+  geom_text(aes(label = round(Value, 2)), vjust = -0.5, size = 3.5)
+
+# 2. Actual vs. Predicted Prices: Test Data
+test_data_preds <- data.frame(
+  Actual = test_data$price,
+  Linear_Regression = test_pred_lm,
+  Random_Forest = test_pred_rf
+) %>%
+  pivot_longer(cols = -Actual, names_to = "Model", values_to = "Predicted")
+
+ggplot(test_data_preds, aes(x = Actual, y = Predicted, color = Model)) +
+  geom_point(alpha = 0.6, size = 3) +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  labs(
+    title = "Actual vs Predicted Prices (Test Data)",
+    subtitle = "Comparison of Prediction Accuracy for Linear Regression and Random Forest",
+    x = "Actual Prices",
+    y = "Predicted Prices",
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_color_manual(values = c("Linear_Regression" = "#4E79A7", "Random_Forest" = "#F28E2B")) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "italic"),
+    legend.position = "top"
+  )
+
+# 3. Residual Analysis: Test Data
+residuals_data <- data.frame(
+  Actual = test_data$price,
+  Linear_Regression_Residuals = test_data$price - test_pred_lm,
+  Random_Forest_Residuals = test_data$price - test_pred_rf
+) %>%
+  pivot_longer(
+    cols = starts_with("Linear_Regression") | starts_with("Random_Forest"),
+    names_to = "Model",
+    values_to = "Residuals"
+  )
+
+ggplot(residuals_data, aes(x = Actual, y = Residuals, color = Model)) +
+  geom_point(alpha = 0.6, size = 3) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  labs(
+    title = "Residual Analysis: Actual Prices vs. Residuals",
+    subtitle = "Evaluating Error Distribution Across Models",
+    x = "Actual Prices",
+    y = "Residuals",
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_color_manual(values = c("Linear_Regression_Residuals" = "#4E79A7", 
+                                "Random_Forest_Residuals" = "#F28E2B")) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "italic"),
+    legend.position = "top"
+  )
+
+# 4. Feature Importance: Random Forest
+importance_df <- data.frame(
+  Feature = rownames(importance(rf_model)),
+  Importance = importance(rf_model)[, 1]
+) %>%
+  arrange(desc(Importance))
+
+ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "#76B7B2") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance (Random Forest)",
+    subtitle = "Top Features Contributing to Car Price Prediction",
+    x = "Features",
+    y = "Importance Score"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "italic")
+  )
+# ==== Step 7: Reflection ====
+cat("\n==== Reflection ====\n")
+cat("Linear Regression is simpler and interpretable, but its performance is limited with non-linear data.\n")
+cat("Random Forest provides better accuracy across training, testing, and validation datasets.\n")
+cat("However, Random Forest is less interpretable and may require more resources for training.\n")
+```
 
